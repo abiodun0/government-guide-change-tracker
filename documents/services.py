@@ -12,6 +12,7 @@ from django.utils import timezone
 
 from .models import DocumentSource, Document, DocumentVersion, ParserType
 from .parsers import get_parser, ParsedDocumentRow
+from .notifiers import ChangeEvent, BaseNotifier, get_default_notifier
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +25,11 @@ class DocumentFetchError(Exception):
 class DocumentSourceService:
     """Service for fetching and processing document sources."""
     
-    def __init__(self, source: DocumentSource):
+    def __init__(self, source: DocumentSource, notifier: Optional[BaseNotifier] = None):
         self.source = source
         self.parser = get_parser(source.parser_type.slug, source.index_url)
+        self.notifier = notifier or get_default_notifier()
+        self.change_events: List[ChangeEvent] = []
     
     def fetch_index_page(self) -> str:
         """
@@ -127,6 +130,7 @@ class DocumentSourceService:
                 'documents_created': int,
                 'documents_updated': int,
                 'versions_created': int,
+                'change_events': list,
                 'errors': list
             }
         """
@@ -134,8 +138,10 @@ class DocumentSourceService:
             'documents_created': 0,
             'documents_updated': 0,
             'versions_created': 0,
+            'change_events': [],
             'errors': []
         }
+        self.change_events = []
         
         try:
             # Fetch and parse
@@ -163,15 +169,25 @@ class DocumentSourceService:
                     else:
                         # Update title/description if changed
                         updated = False
+                        changes = []
                         if document.title != normalized['title']:
                             document.title = normalized['title']
                             updated = True
+                            changes.append('title')
                         if document.description != normalized['description']:
                             document.description = normalized['description']
                             updated = True
+                            changes.append('description')
                         if updated:
                             document.save()
                             results['documents_updated'] += 1
+                            # Create change event for document update
+                            event = ChangeEvent(
+                                document=document,
+                                event_type='updated_document',
+                                change_reason=', '.join(changes)
+                            )
+                            self.change_events.append(event)
                     
                     # Check if version already exists
                     pdf_hash = None
@@ -180,14 +196,17 @@ class DocumentSourceService:
                     
                     # If we have a hash, check for existing version
                     if pdf_hash:
-                        version_exists = DocumentVersion.objects.filter(
+                        existing_version = DocumentVersion.objects.filter(
                             document=document,
                             pdf_hash=pdf_hash
-                        ).exists()
+                        ).first()
                         
-                        if not version_exists:
+                        if not existing_version:
+                            # Get previous version for comparison
+                            previous_version = document.current_version
+                            
                             # Create new version
-                            DocumentVersion.objects.create(
+                            new_version = DocumentVersion.objects.create(
                                 document=document,
                                 pdf_url=normalized['pdf_link'],
                                 published_date=normalized['published_date'],
@@ -196,11 +215,33 @@ class DocumentSourceService:
                             )
                             results['versions_created'] += 1
                             
+                            # Determine change reason
+                            change_reason = 'pdf_hash_changed'
+                            if previous_version:
+                                if normalized['published_date'] and previous_version.published_date:
+                                    if normalized['published_date'] > previous_version.published_date:
+                                        change_reason = 'new_published_date'
+                                elif normalized['published_date'] and not previous_version.published_date:
+                                    change_reason = 'published_date_added'
+                            
+                            # Create change event
+                            if created:
+                                event = ChangeEvent(
+                                    document=document,
+                                    event_type='new_document',
+                                    version=new_version
+                                )
+                            else:
+                                event = ChangeEvent(
+                                    document=document,
+                                    event_type='new_version',
+                                    version=new_version,
+                                    previous_version=previous_version,
+                                    change_reason=change_reason
+                                )
+                            self.change_events.append(event)
+                            
                             # Update current_version if this is newer
-                            new_version = DocumentVersion.objects.get(
-                                document=document,
-                                pdf_hash=pdf_hash
-                            )
                             if not document.current_version:
                                 document.current_version = new_version
                                 document.save()
@@ -213,21 +254,60 @@ class DocumentSourceService:
                                 document.current_version = new_version
                                 document.save()
                     else:
-                        # Without hash, create version if URL is different
-                        version_exists = DocumentVersion.objects.filter(
-                            document=document,
-                            pdf_url=normalized['pdf_link']
-                        ).exists()
+                        # Without hash, check by published date if available
+                        previous_version = document.current_version
+                        version_exists = False
+                        change_reason = None
+                        
+                        if normalized['published_date']:
+                            # Check if version with this published date exists
+                            existing_version = DocumentVersion.objects.filter(
+                                document=document,
+                                published_date=normalized['published_date']
+                            ).first()
+                            
+                            if existing_version:
+                                version_exists = True
+                            elif previous_version and previous_version.published_date:
+                                # Compare dates
+                                if normalized['published_date'] > previous_version.published_date:
+                                    change_reason = 'new_published_date'
+                            elif not previous_version or not previous_version.published_date:
+                                change_reason = 'published_date_added'
                         
                         if not version_exists:
-                            DocumentVersion.objects.create(
+                            # Create version if URL is different or date is newer
+                            url_exists = DocumentVersion.objects.filter(
                                 document=document,
-                                pdf_url=normalized['pdf_link'],
-                                published_date=normalized['published_date'],
-                                pdf_hash='',  # Will be updated later
-                                fetched_at=timezone.now()
-                            )
-                            results['versions_created'] += 1
+                                pdf_url=normalized['pdf_link']
+                            ).exists()
+                            
+                            if not url_exists or change_reason:
+                                new_version = DocumentVersion.objects.create(
+                                    document=document,
+                                    pdf_url=normalized['pdf_link'],
+                                    published_date=normalized['published_date'],
+                                    pdf_hash='',  # Will be updated later
+                                    fetched_at=timezone.now()
+                                )
+                                results['versions_created'] += 1
+                                
+                                # Create change event
+                                if created:
+                                    event = ChangeEvent(
+                                        document=document,
+                                        event_type='new_document',
+                                        version=new_version
+                                    )
+                                else:
+                                    event = ChangeEvent(
+                                        document=document,
+                                        event_type='new_version',
+                                        version=new_version,
+                                        previous_version=previous_version,
+                                        change_reason=change_reason or 'url_changed'
+                                    )
+                                self.change_events.append(event)
                 
                 except Exception as e:
                     error_msg = f"Error processing row {row.title}: {e}"
@@ -239,16 +319,26 @@ class DocumentSourceService:
             logger.error(error_msg)
             results['errors'].append(error_msg)
         
+        # Send notifications for changes
+        if self.change_events:
+            results['change_events'] = self.change_events
+            try:
+                self.notifier.notify(self.change_events)
+            except Exception as e:
+                logger.error(f"Failed to send notifications: {e}")
+                results['errors'].append(f"Notification error: {e}")
+        print(results, 'what are the results?')
         return results
 
 
-def process_document_source(source_id: int, fetch_pdfs: bool = False) -> dict:
+def process_document_source(source_id: int, fetch_pdfs: bool = False, notifier: Optional[BaseNotifier] = None) -> dict:
     """
     Convenience function to process a document source by ID.
     
     Args:
         source_id: ID of the DocumentSource to process
         fetch_pdfs: If True, fetch PDFs to calculate hashes
+        notifier: Optional notifier instance (uses default if not provided)
         
     Returns:
         Processing results dictionary
@@ -258,6 +348,6 @@ def process_document_source(source_id: int, fetch_pdfs: bool = False) -> dict:
     except DocumentSource.DoesNotExist:
         raise ValueError(f"DocumentSource with id {source_id} not found or inactive")
     
-    service = DocumentSourceService(source)
+    service = DocumentSourceService(source, notifier=notifier)
     return service.process_source(fetch_pdfs=fetch_pdfs)
 

@@ -5,6 +5,7 @@ Django settings for government_guide_change_tracker project.
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from datetime import timedelta
 
 # Load environment variables
 load_dotenv()
@@ -131,6 +132,17 @@ CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = TIME_ZONE
+
+# Celery Beat Schedule
+from celery.schedules import crontab
+
+CELERY_BEAT_SCHEDULE = {
+    'process-all-document-sources': {
+        'task': 'documents.tasks.scheduled_process_all_sources',
+        'schedule': timedelta(minutes=2),
+        # 'schedule': crontab(minute=0, hour='*/6'),  # Every 6 hours
+    },
+}
 
 # Cache configuration
 CACHES = {

@@ -61,11 +61,15 @@ A minimal Django application with Docker Compose, PostgreSQL, Redis, and Celery.
 - **PostgreSQL**: Database on port 5432
 - **Redis**: Cache and message broker on port 6379
 - **Celery**: Background task worker
+- **Celery Beat**: Scheduled task scheduler (runs every 6 hours to check for document changes)
 
 ## Usage
 
 - Access the Django admin at: http://localhost:8000/admin/
 - The Celery worker will process background tasks automatically
+- Celery Beat automatically checks for document changes every 6 hours
+- Changes are detected based on PDF hash comparison and published date
+- Notifications are logged (can be extended to email/webhook)
 
 ## Development
 
