@@ -1,5 +1,15 @@
 from django.contrib import admin
-from .models import DocumentSource, Document, DocumentVersion
+from .models import ParserType, DocumentSource, Document, DocumentVersion
+
+
+@admin.register(ParserType)
+class ParserTypeAdmin(admin.ModelAdmin):
+    list_display = ['name', 'slug', 'active', 'created_at']
+    list_filter = ['active', 'created_at']
+    search_fields = ['name', 'slug']
+    list_editable = ['active']
+    prepopulated_fields = {'slug': ('name',)}
+    readonly_fields = ['created_at', 'updated_at']
 
 
 @admin.register(DocumentSource)
@@ -8,6 +18,7 @@ class DocumentSourceAdmin(admin.ModelAdmin):
     list_filter = ['active', 'parser_type', 'created_at']
     search_fields = ['name', 'index_url']
     list_editable = ['active']
+    raw_id_fields = ['parser_type']
 
 
 @admin.register(Document)

@@ -1,11 +1,49 @@
 from django.db import models
+from django.core.exceptions import ValidationError
 
 
-class ParserType(models.TextChoices):
-    """Parser types for different document sources."""
-    GINNIE_MAE = 'ginnie_mae', 'Ginnie Mae'
-    USDA = 'usda', 'USDA'
-    CUSTOM = 'custom', 'Custom'
+class ParserType(models.Model):
+    """
+    Parser types for different document sources.
+    Uses dash-slug as unique identifier for strategy pattern.
+    """
+    slug = models.SlugField(
+        max_length=100,
+        unique=True,
+        help_text="Dash-separated unique identifier (e.g., 'ginnie-mae', 'usda')"
+    )
+    name = models.CharField(
+        max_length=255,
+        help_text="Display name for the parser type (e.g., 'Ginnie Mae')"
+    )
+    active = models.BooleanField(
+        default=True,
+        help_text="Whether this parser type is currently active"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name']
+        verbose_name = 'Parser Type'
+        verbose_name_plural = 'Parser Types'
+
+    def clean(self):
+        """Validate that slug uses dashes, not underscores."""
+        if self.slug and '_' in self.slug:
+            raise ValidationError({
+                'slug': 'Slug must use dashes, not underscores (e.g., "ginnie-mae" not "ginnie_mae")'
+            })
+
+    def save(self, *args, **kwargs):
+        """Ensure slug uses dashes before saving."""
+        if self.slug:
+            self.slug = self.slug.replace('_', '-').lower()
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.name} ({self.slug})"
 
 
 class DocumentSource(models.Model):
@@ -20,10 +58,10 @@ class DocumentSource(models.Model):
         max_length=500,
         help_text="URL of the HTML page listing the PDFs"
     )
-    parser_type = models.CharField(
-        max_length=50,
-        choices=ParserType.choices,
-        default=ParserType.CUSTOM,
+    parser_type = models.ForeignKey(
+        ParserType,
+        on_delete=models.PROTECT,
+        related_name='document_sources',
         help_text="Determines which parser to use for this source"
     )
     active = models.BooleanField(
