@@ -18,7 +18,12 @@ class DocumentSourceAdmin(admin.ModelAdmin):
     list_filter = ['active', 'parser_type', 'created_at']
     search_fields = ['name', 'index_url']
     list_editable = ['active']
-    raw_id_fields = ['parser_type']
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        """Filter parser_type choices to only show active parser types."""
+        if db_field.name == 'parser_type':
+            kwargs['queryset'] = ParserType.objects.filter(active=True).order_by('name')
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 
 @admin.register(Document)
