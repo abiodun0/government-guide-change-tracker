@@ -27,7 +27,6 @@ class DocumentSourceService:
     def __init__(self, source: DocumentSource):
         self.source = source
         self.parser = get_parser(source.parser_type.slug, source.index_url)
-        print(self.parser, 'what is in the parser')
     
     def fetch_index_page(self) -> str:
         """
@@ -65,7 +64,6 @@ class DocumentSourceService:
         """
         try:
             rows = self.parser.extract_rows(html)
-            print(rows, 'what is in the rows')
             logger.info(f"Parsed {len(rows)} documents from {self.source.name}")
             return rows
         except Exception as e:
@@ -143,7 +141,6 @@ class DocumentSourceService:
             # Fetch and parse
             html = self.fetch_index_page()
             parsed_rows = self.parse_documents(html)
-            print(parsed_rows, 'what is in the parsed rows')
 
             
             # Process each row
