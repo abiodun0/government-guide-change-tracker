@@ -14,7 +14,7 @@ class ParserTypeAdmin(admin.ModelAdmin):
 
 @admin.register(DocumentSource)
 class DocumentSourceAdmin(admin.ModelAdmin):
-    list_display = ['name', 'parser_type', 'active', 'created_at']
+    list_display = ['id', 'name', 'parser_type', 'active', 'created_at']
     list_filter = ['active', 'parser_type', 'created_at']
     search_fields = ['name', 'index_url']
     list_editable = ['active']
@@ -28,7 +28,7 @@ class DocumentSourceAdmin(admin.ModelAdmin):
 
 @admin.register(Document)
 class DocumentAdmin(admin.ModelAdmin):
-    list_display = ['title', 'source', 'slug', 'has_current_version', 'created_at']
+    list_display = ['id', 'title', 'source', 'slug', 'has_current_version', 'created_at']
     list_filter = ['source', 'created_at']
     search_fields = ['title', 'slug', 'description']
     raw_id_fields = ['source', 'current_version']
