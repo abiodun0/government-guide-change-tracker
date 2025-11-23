@@ -151,7 +151,9 @@ class DocumentVersion(models.Model):
     )
     pdf_hash = models.CharField(
         max_length=64,
-        help_text="SHA-256 hash of the downloaded PDF file"
+        help_text="SHA-256 hash of the downloaded PDF file",
+        null=True,
+        blank=True,
     )
     fetched_at = models.DateTimeField(
         auto_now_add=True,
@@ -161,7 +163,14 @@ class DocumentVersion(models.Model):
     class Meta:
         ordering = ['-fetched_at']
         constraints = [
-            models.UniqueConstraint(fields=['document', 'pdf_hash'], name='unique_document_version_hash')
+            models.UniqueConstraint(
+                fields=['document', 'pdf_hash'],
+                name='unique_document_version_hash',
+                condition=(
+                    ~models.Q(pdf_hash__isnull=True) &
+                    ~models.Q(pdf_hash="")     # ignore empty string
+                )
+            )
         ]
         verbose_name = 'Document Version'
         verbose_name_plural = 'Document Versions'

@@ -4,15 +4,15 @@ Service layer for fetching and processing document sources.
 import hashlib
 import logging
 from typing import List, Optional
-from urllib.parse import urlparse
 
 import requests
 from django.db import transaction
 from django.utils import timezone
 
-from .models import DocumentSource, Document, DocumentVersion, ParserType
+from .models import DocumentSource, Document, DocumentVersion
 from .parsers import get_parser, ParsedDocumentRow
 from .notifiers import ChangeEvent, BaseNotifier, get_default_notifier
+from .sample import text_html
 
 logger = logging.getLogger(__name__)
 
@@ -41,10 +41,12 @@ class DocumentSourceService:
         Raises:
             DocumentFetchError: If fetching fails
         """
+        if self.source.parser_type.slug == 'usda':
+            return text_html
         try:
             response = requests.get(
                 self.source.index_url,
-                timeout=30,
+                timeout=100,
                 headers={
                     'User-Agent': 'Mozilla/5.0 (compatible; DocumentTracker/1.0)'
                 }
@@ -86,7 +88,7 @@ class DocumentSourceService:
         slug = self.parser.build_slug(row.title)
         
         return {
-            'title': self.parser.normalize_title(row.title),
+            'title': row.title,
             'slug': slug,
             'description': self.parser.normalize_description(row.description),
             'pdf_link': row.pdf_link,
@@ -172,13 +174,18 @@ class DocumentSourceService:
                         changes = []
                         if document.title != normalized['title']:
                             document.title = normalized['title']
+                            print(document.title, normalized['title'])
                             updated = True
                             changes.append('title')
                         if document.description != normalized['description']:
+                            print(document.description, '---', normalized['description'], normalized['slug'])
                             document.description = normalized['description']
+                            print(document.description == normalized['description'])
+
                             updated = True
                             changes.append('description')
                         if updated:
+                            print('got here?')
                             document.save()
                             results['documents_updated'] += 1
                             # Create change event for document update
@@ -327,7 +334,6 @@ class DocumentSourceService:
             except Exception as e:
                 logger.error(f"Failed to send notifications: {e}")
                 results['errors'].append(f"Notification error: {e}")
-        print(results, 'what are the results?')
         return results
 
 

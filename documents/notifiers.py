@@ -5,6 +5,9 @@ import logging
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 from datetime import date
+from django.core.mail import send_mail
+from django.conf import settings
+
 
 from .models import Document, DocumentVersion, DocumentSource
 
@@ -125,8 +128,14 @@ class EmailNotifier(BaseNotifier):
             return True
         
         message = self.format_message(events)
-        # TODO: Implement email sending
-        logger.info(f"Email notification would be sent to {self.recipient_emails}:\n{message}")
+        send_mail(
+            subject="Notification of changes",
+            message=message,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=settings.NOTIFICATION_EMAILS,
+            fail_silently=False,
+        )
+        logger.info(f"Email notification would be sent to {settings.NOTIFICATION_EMAILS}:\n{message}")
         return True
 
 

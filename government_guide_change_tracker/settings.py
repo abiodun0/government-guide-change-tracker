@@ -139,8 +139,8 @@ from celery.schedules import crontab
 CELERY_BEAT_SCHEDULE = {
     'process-all-document-sources': {
         'task': 'documents.tasks.scheduled_process_all_sources',
-        'schedule': timedelta(minutes=2),
-        # 'schedule': crontab(minute=0, hour='*/6'),  # Every 6 hours
+        # 'schedule': timedelta(minutes=2),
+        'schedule': crontab(minute=0, hour='*/6'),  # Every 6 hours
     },
 }
 
@@ -152,3 +152,6 @@ CACHES = {
     }
 }
 
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'  # For development
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'admin@library.com')
+NOTIFICATION_EMAILS = os.getenv('NOTIFICATION_EMAILS', [])

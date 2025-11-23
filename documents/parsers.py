@@ -5,11 +5,10 @@ Uses strategy pattern with source-specific parsers.
 import re
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import List, Optional, Dict, Any
-from urllib.parse import urljoin, urlparse
+from typing import List, Optional
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
-import requests
 
 
 class ParsedDocumentRow:
@@ -142,19 +141,6 @@ class BaseParser(ABC):
         if not row.title or not row.pdf_link:
             return False
         
-        # Filter out category headers (common patterns)
-        category_patterns = [
-            r'^table of contents',
-            r'^index',
-            r'^chapter\s*$',
-            r'^summary',
-        ]
-        
-        title_lower = row.title.lower().strip()
-        for pattern in category_patterns:
-            if re.match(pattern, title_lower):
-                return False
-        
         return True
 
 
@@ -171,7 +157,7 @@ class GinnieMaeParser(BaseParser):
         
         if table:
             rows.extend(self._extract_from_table(table))
-        
+
         # Strategy 2: Fallback - find all PDF links directly (heuristic approach)
         if not rows:
             rows.extend(self._extract_from_pdf_links(soup))
@@ -262,7 +248,10 @@ class GinnieMaeParser(BaseParser):
     def _extract_title(self, link_tag: BeautifulSoup, cells: List, tr: BeautifulSoup) -> Optional[str]:
         """Extract title using multiple strategies - doesn't depend on th tags."""
         # Strategy 1: Link text (most reliable)
+        print(cells[1].get_text(strip=True), 'cells')
         title = link_tag.get_text(strip=True)
+        print(cells[1].get_text(strip=True), 'cells', title)
+
         if title:
             return title
         
@@ -343,7 +332,7 @@ class GinnieMaeParser(BaseParser):
         
         # Missing published date is allowed - will fall back to PDF hash comparison
         return None
-    
+
     def _extract_from_pdf_links(self, soup: BeautifulSoup) -> List[ParsedDocumentRow]:
         """Fallback: Extract rows by finding all PDF links directly (heuristic approach)."""
         rows = []
@@ -402,43 +391,82 @@ class USDAParser(BaseParser):
     """Parser for USDA Handbook pages."""
     
     def extract_rows(self, html: str) -> List[ParsedDocumentRow]:
-        """Extract rows from USDA Handbook HTML."""
         soup = self.parse_html(html)
         rows = []
+        div = self._find_table_div_pdfs(soup)
+
+        if div:
+            rows.extend(self._extract_from_div(div))
+
         
-        # USDA-specific parsing logic
-        # This is a placeholder - adjust based on actual USDA page structure
-        links = soup.find_all('a', href=re.compile(r'\.pdf', re.I))
+        return rows
+
+    def _find_table_div_pdfs(self, soup: BeautifulSoup) -> Optional[BeautifulSoup]:
+        """Find table containing PDF links using multiple strategies."""
+        # Strategy 1: CSS selector with class/id containing keywords
+        selectors = [
+            'div[class*="view-content"]',
+        ]
         
-        for link in links:
-            pdf_link = link.get('href', '')
+        for selector in selectors:
+            try:
+                div = soup.select_one(selector)
+                if div and div.find('a', href=re.compile(r'\.pdf', re.I)):
+                    return div
+            except Exception:
+                continue
+        
+        # Strategy 2: Find any table with PDF links
+        divs = soup.find_all('div')
+        for div in divs:
+            if div.find('a', href=re.compile(r'\.pdf', re.I)):
+                return div
+        
+        return None
+    
+    def _extract_from_div(self, soup: BeautifulSoup) -> List[ParsedDocumentRow]:
+        """Fallback: Extract rows by finding all PDF links directly (heuristic approach)."""
+        rows = []
+        
+        # Find all PDF links (heuristic: first <a> tag with .pdf)
+        for row in soup.select('.views-row'):
+            link_tag = row.select_one('.views-field-download-media a')
+            if not link_tag:
+                continue  # skip entries without PDF links
+
+            pdf_link = link_tag['href'].strip()
             pdf_link = self.normalize_pdf_link(pdf_link)
             if not pdf_link:
                 continue
-            
-            title = link.get_text(strip=True)
+            title = link_tag.get_text(strip=True)
             title = self.normalize_title(title)
-            
-            # Try to find description in parent element
-            description = None
-            parent = link.find_parent(['div', 'li', 'td'])
+            if not title:
+                continue
+            # description is inside: .views-field-body p
+            desc_tag = row.select_one('.views-field-body p')
+            description = desc_tag.get_text(strip=True) if desc_tag else None
+            description = self.normalize_description(description)
+            if not description:
+                continue
+            published_date = None
+            parent = desc_tag.find_parent(['div', 'li', 'td', 'p'])
             if parent:
-                desc_text = parent.get_text(strip=True)
-                if desc_text and desc_text != title:
-                    description = self.normalize_description(desc_text)
+                date_match = re.search(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', parent.get_text())
+                if date_match:
+                    published_date = self.parse_date(date_match.group())
             
             row = ParsedDocumentRow(
                 title=title,
                 pdf_link=pdf_link,
                 description=description,
-                published_date=None
+                published_date=published_date
             )
             
+            # Validate: must have title + valid PDF link
             if self.is_valid_row(row):
                 rows.append(row)
         
         return rows
-
 
 class CustomParser(BaseParser):
     """Generic parser for unknown sources - uses heuristics."""
