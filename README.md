@@ -75,11 +75,11 @@ A minimal Django application with Docker Compose, PostgreSQL, Redis, and Celery.
 
 To run Django commands:
 ```bash
-docker-compose exec web python manage.py <command>
+docker compose exec web python manage.py <command>
 ```
 
 To view logs:
 ```bash
-docker-compose logs -f
+docker compose logs -f
 ```
 
