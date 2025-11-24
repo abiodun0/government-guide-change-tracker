@@ -283,7 +283,7 @@ These fallbacks ensure robust scraping even after layout updates.
 # 4. DocumentSourceService
 
 This is the heart of the implmentation:
-![Parser Classess](DocumentService.jpg "Parser Diagram")
+![Parser Classess](DocumentService.svg "Parser Diagram")
 
 This service orchestrates the full lifecycle for **each** source:
 
