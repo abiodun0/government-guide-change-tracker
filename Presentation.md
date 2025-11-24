@@ -527,7 +527,7 @@ This keeps business logic centralized and decouples parsing from persistence.
 ---
 
 # 6. Notification System
-![Notifier Classes](Notifier.jpg "Notifier Workflow Diagram")
+![Notifier Classes](NotifierClass.jpg "Notifier Workflow Diagram")
 
 ### What Triggers a Notification?
 - New DocumentVersion created
