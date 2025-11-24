@@ -46,7 +46,7 @@ class DocumentSourceService:
         try:
             response = requests.get(
                 self.source.index_url,
-                timeout=100,
+                timeout=30,
                 headers={
                     'User-Agent': 'Mozilla/5.0 (compatible; DocumentTracker/1.0)'
                 }

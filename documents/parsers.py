@@ -134,7 +134,58 @@ class BaseParser(ABC):
             return False
         
         return True
-
+    def extract_from_pdf_links(self) -> List[ParsedDocumentRow]:
+        """Fallback: Extract rows by finding all PDF links directly (heuristic approach)."""
+        rows = []
+        
+        # Find all PDF links (heuristic: first <a> tag with .pdf)
+        pdf_links = self.soup.find_all('a', href=re.compile(r'\.pdf', re.I))
+        
+        for link in pdf_links:
+            pdf_link = link.get('href', '')
+            pdf_link = self.normalize_pdf_link(pdf_link)
+            if not pdf_link:
+                continue
+            
+            # Extract title from link text
+            title = link.get_text(strip=True)
+            if not title:
+                # Try parent element
+                parent = link.find_parent(['td', 'th', 'div', 'li', 'p'])
+                if parent:
+                    title = parent.get_text(strip=True)
+            
+            title = self.normalize_title(title)
+            if not title:
+                continue
+            
+            # Extract description from nearby elements
+            description = None
+            parent = link.find_parent(['td', 'th', 'div', 'li', 'p'])
+            if parent:
+                full_text = parent.get_text(separator=' ', strip=True)
+                if full_text and full_text != title:
+                    description = self.normalize_description(full_text)
+            
+            # Extract date from nearby text (optional)
+            published_date = None
+            if parent:
+                date_match = re.search(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', parent.get_text())
+                if date_match:
+                    published_date = self.parse_date(date_match.group())
+            
+            row = ParsedDocumentRow(
+                title=title,
+                pdf_link=pdf_link,
+                description=description,
+                published_date=published_date
+            )
+            
+            # Validate: must have title + valid PDF link
+            if self.is_valid_row(row):
+                rows.append(row)
+        
+        return rows
 
 class GinnieMaeParser(BaseParser):
     """Parser for Ginnie Mae MBS Guide Library page."""
@@ -152,7 +203,7 @@ class GinnieMaeParser(BaseParser):
 
         # Strategy 2: Fallback - find all PDF links directly (heuristic approach)
         if not rows:
-            rows.extend(self._extract_from_pdf_links(soup))
+            rows.extend(self.extract_from_pdf_links())
         
         return rows
     
@@ -323,59 +374,6 @@ class GinnieMaeParser(BaseParser):
         # Missing published date is allowed - will fall back to PDF hash comparison
         return None
 
-    def _extract_from_pdf_links(self, soup: BeautifulSoup) -> List[ParsedDocumentRow]:
-        """Fallback: Extract rows by finding all PDF links directly (heuristic approach)."""
-        rows = []
-        
-        # Find all PDF links (heuristic: first <a> tag with .pdf)
-        pdf_links = soup.find_all('a', href=re.compile(r'\.pdf', re.I))
-        
-        for link in pdf_links:
-            pdf_link = link.get('href', '')
-            pdf_link = self.normalize_pdf_link(pdf_link)
-            if not pdf_link:
-                continue
-            
-            # Extract title from link text
-            title = link.get_text(strip=True)
-            if not title:
-                # Try parent element
-                parent = link.find_parent(['td', 'th', 'div', 'li', 'p'])
-                if parent:
-                    title = parent.get_text(strip=True)
-            
-            title = self.normalize_title(title)
-            if not title:
-                continue
-            
-            # Extract description from nearby elements
-            description = None
-            parent = link.find_parent(['td', 'th', 'div', 'li', 'p'])
-            if parent:
-                full_text = parent.get_text(separator=' ', strip=True)
-                if full_text and full_text != title:
-                    description = self.normalize_description(full_text)
-            
-            # Extract date from nearby text (optional)
-            published_date = None
-            if parent:
-                date_match = re.search(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', parent.get_text())
-                if date_match:
-                    published_date = self.parse_date(date_match.group())
-            
-            row = ParsedDocumentRow(
-                title=title,
-                pdf_link=pdf_link,
-                description=description,
-                published_date=published_date
-            )
-            
-            # Validate: must have title + valid PDF link
-            if self.is_valid_row(row):
-                rows.append(row)
-        
-        return rows
-
 
 class USDAParser(BaseParser):
     """Parser for USDA Handbook pages."""
@@ -384,10 +382,15 @@ class USDAParser(BaseParser):
         soup = self.parse_html(html)
         rows = []
         div = self._find_table_div_pdfs(soup)
+        
+        # Strategy 1: CSS selector with class/id containing keywords
 
         if div:
             rows.extend(self._extract_from_div(div))
 
+        # Strategy 2: Fallback - find all PDF links directly (heuristic approach)
+        if not rows:
+            rows.extend(self.extract_from_pdf_links())
         
         return rows
 
@@ -462,48 +465,8 @@ class CustomParser(BaseParser):
     """Generic parser for unknown sources - uses heuristics."""
     
     def extract_rows(self, html: str) -> List[ParsedDocumentRow]:
-        """Extract rows using generic heuristics."""
-        soup = self.parse_html(html)
         rows = []
-        
-        # Find all PDF links
-        links = soup.find_all('a', href=re.compile(r'\.pdf', re.I))
-        
-        for link in links:
-            pdf_link = link.get('href', '')
-            pdf_link = self.normalize_pdf_link(pdf_link)
-            if not pdf_link:
-                continue
-            
-            title = link.get_text(strip=True)
-            title = self.normalize_title(title)
-            
-            # Try to find description nearby
-            description = None
-            parent = link.find_parent(['div', 'li', 'td', 'p'])
-            if parent:
-                # Get all text, remove the link text
-                full_text = parent.get_text(separator=' ', strip=True)
-                if full_text and full_text != title:
-                    description = self.normalize_description(full_text)
-            
-            # Try to find date nearby
-            published_date = None
-            if parent:
-                # Look for date patterns in parent or siblings
-                date_text = re.search(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', parent.get_text())
-                if date_text:
-                    published_date = self.parse_date(date_text.group())
-            
-            row = ParsedDocumentRow(
-                title=title,
-                pdf_link=pdf_link,
-                description=description,
-                published_date=published_date
-            )
-            
-            if self.is_valid_row(row):
-                rows.append(row)
+        rows.extend(self.extract_from_pdf_links())
         
         return rows
 
