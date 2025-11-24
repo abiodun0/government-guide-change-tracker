@@ -28,7 +28,7 @@ class DocumentSourceAdmin(admin.ModelAdmin):
 
 @admin.register(Document)
 class DocumentAdmin(admin.ModelAdmin):
-    list_display = ['id', 'title', 'source', 'slug', 'description', 'has_current_version', 'created_at']
+    list_display = ['title', 'source', 'slug', 'description', 'has_current_version', 'created_at']
     list_filter = ['source', 'created_at']
     search_fields = ['title', 'slug', 'description']
     raw_id_fields = ['source', 'current_version']

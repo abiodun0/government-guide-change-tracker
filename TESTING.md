@@ -6,12 +6,12 @@ This guide will help you test the document parsing functionality.
 
 1. Make sure Docker containers are running:
    ```bash
-   docker-compose up -d
+   docker compose up -d
    ```
 
 2. Ensure migrations are applied:
    ```bash
-   docker-compose exec web python manage.py migrate
+   docker compose exec web python manage.py migrate
    ```
 
 ## Step 1: Create a ParserType
@@ -22,7 +22,7 @@ You need to create a parser type first. You can do this via Django admin or Djan
 
 1. Create a superuser if you haven't already:
    ```bash
-   docker-compose exec web python manage.py createsuperuser
+   docker compose exec web python manage.py createsuperuser
    ```
 
 2. Access the admin at: http://localhost:8000/admin/
@@ -36,7 +36,7 @@ You need to create a parser type first. You can do this via Django admin or Djan
 ### Option B: Via Django Shell
 
 ```bash
-docker-compose exec web python manage.py shell
+docker compose exec web python manage.py shell
 ```
 
 Then run:
@@ -68,7 +68,7 @@ exit()
 ### Option B: Via Django Shell
 
 ```bash
-docker-compose exec web python manage.py shell
+docker compose exec web python manage.py shell
 ```
 
 Then run:
@@ -91,7 +91,7 @@ exit()
 Now you can test the parsing! Replace `1` with your DocumentSource ID:
 
 ```bash
-docker-compose exec web python manage.py fetch_documents 1
+docker compose exec web python manage.py fetch_documents 1
 ```
 
 ### With PDF Hash Calculation (Slower but More Accurate)
@@ -99,7 +99,7 @@ docker-compose exec web python manage.py fetch_documents 1
 If you want to fetch PDFs and calculate hashes (this is slower):
 
 ```bash
-docker-compose exec web python manage.py fetch_documents 1 --fetch-pdfs
+docker compose exec web python manage.py fetch_documents 1 --fetch-pdfs
 ```
 
 ## Step 4: Check the Results
@@ -127,7 +127,7 @@ Versions created: 37
 ### Verify via Django Shell
 
 ```bash
-docker-compose exec web python manage.py shell
+docker compose exec web python manage.py shell
 ```
 
 ```python
@@ -162,7 +162,7 @@ for doc in source.documents.all()[:5]:
 
 ### View Logs
 ```bash
-docker-compose logs -f web
+docker compose logs -f web
 ```
 
 ## Quick Test Script
@@ -170,7 +170,7 @@ docker-compose logs -f web
 You can also use this quick setup script:
 
 ```bash
-docker-compose exec web python manage.py shell << EOF
+docker compose exec web python manage.py shell << EOF
 from documents.models import ParserType, DocumentSource
 
 # Create parser type
@@ -195,6 +195,6 @@ EOF
 
 Then run:
 ```bash
-docker-compose exec web python manage.py fetch_documents 1
+docker compose exec web python manage.py fetch_documents 1
 ```
 

@@ -107,33 +107,25 @@ class BaseParser(ABC):
 
         return None
 
-    def build_slug(self, title: str) -> str:
+    def build_slug(self, title: str, description: Optional[str] = None) -> str:
         """
-        Build a deterministic slug from title.
-        Extracts digits first, falls back to sanitized title.
+        Build a deterministic slug using BOTH title and description.
+        No priority — they are combined into a single text block.
+        Sanitatise combined text.
         """
-        if not title:
+
+        # Combine both fields (even if one is None or empty)
+        combined = f"{title or ''} {description or ''}".strip()
+
+        if not combined:
             return ""
-        
-        # Extract digits (e.g., "Chapter 03" -> "03")
-        digits_match = re.search(r'\d+', title)
-        if digits_match:
-            digits = digits_match.group()
-            # Try to extract chapter number pattern
-            chapter_match = re.search(r'chapter\s*(\d+)', title, re.IGNORECASE)
-            if chapter_match:
-                chapter_num = chapter_match.group(1).zfill(2)
-                return f"ch_{chapter_num}"
-            return f"doc_{digits}"
-        
-        # Fallback: sanitize title
-        # Convert to lowercase, replace spaces with underscores, remove special chars
-        slug = title.lower()
+
+        slug = combined.lower()
         slug = re.sub(r'[^\w\s-]', '', slug)
         slug = re.sub(r'[-\s]+', '_', slug)
         slug = slug.strip('_')
-        
-        return slug[:100]  # Limit length
+
+        return slug[:100]
 
     def is_valid_row(self, row: ParsedDocumentRow) -> bool:
         """Check if a row has required fields and is not a category header."""
@@ -248,9 +240,7 @@ class GinnieMaeParser(BaseParser):
     def _extract_title(self, link_tag: BeautifulSoup, cells: List, tr: BeautifulSoup) -> Optional[str]:
         """Extract title using multiple strategies - doesn't depend on th tags."""
         # Strategy 1: Link text (most reliable)
-        print(cells[1].get_text(strip=True), 'cells')
         title = link_tag.get_text(strip=True)
-        print(cells[1].get_text(strip=True), 'cells', title)
 
         if title:
             return title
