@@ -67,12 +67,13 @@ A **slug** conjoined with **source** is:
 - Deterministic
 - Stable across versions
 - Generated from canonical parts of the title  
-  (e.g., extracting *chapter numbers* or running `slugify(title)`)
+  (e.g., extracting *chapter numbers* or running `slugify(title, description)`)
 
 This allows:
 - Version tracking across updates
 - Preventing duplicates
 - Supporting sites with inconsistent titles
+- Supproting sites(like USDA) with the same titles but different description
 
 ---
 
