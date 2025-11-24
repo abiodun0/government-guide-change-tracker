@@ -339,7 +339,7 @@ This service orchestrates the full lifecycle for **each** source:
    - Decide whether PDF must be downloaded:
      - Rule A: Always compare published date first
      - Rule B: If published date unchanged → maybe skip
-     - Rule C: If published date missing → ALWAYS hash
+     - Rule C: If published date missing and the option to fetch hash was chosen → ALWAYS hash
 4. Download PDF (if needed)
 5. Compute hash and compare with latest version (here is sample of change detection logic)
     ```python
