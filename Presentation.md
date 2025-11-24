@@ -337,153 +337,184 @@ This service orchestrates the full lifecycle for **each** source:
    - Generate slug
    - Get or create Document
    - Decide whether PDF must be downloaded:
-     - If requested by the source command.
-     - If no published date → must download
-     - If date not changed → optionally skip
+     - Rule A: Always compare published date first
+     - Rule B: If published date unchanged → maybe skip
+     - Rule C: If published date missing → ALWAYS hash
 4. Download PDF (if needed)
 5. Compute hash and compare with latest version (here is sample of change detection logic)
     ```python
-        document, created = Document.objects.get_or_create(
-                        source=self.source,
-                        slug=normalized['slug'],
-                        defaults={
-                            'title': normalized['title'],
-                            'description': normalized['description'],
-                        }
-                    )
-        # for title and description
-        if not created:
-            updated = False
-            changes = []
-            if document.title != normalized['title']:
-                document.title = normalized['title']
-                print(document.title, normalized['title'])
-                updated = True
-                changes.append('title')
-            if document.description != normalized['description']:
-                print(document.description, '---', normalized['description'], normalized['slug'])
-                document.description = normalized['description']
-                print(document.description == normalized['description'])
+    # Process each row
+    for row in parsed_rows:
+        try:
+            normalized = self.normalize_row(row)
 
-                updated = True
-                changes.append('description')
-            if updated:
-                print('got here?')
-                document.save()
-                results['documents_updated'] += 1
-                # Create change event for document update
-                event = ChangeEvent(
+            # ----------------------------------------------
+            # 1. Get or create document
+            # ----------------------------------------------
+            document, created = Document.objects.get_or_create(
+                source=self.source,
+                slug=normalized['slug'],
+                defaults={
+                    'title': normalized['title'],
+                    'description': normalized['description'],
+                }
+            )
+
+            if created:
+                results['documents_created'] += 1
+            else:
+                # ----------------------------------------------
+                # Update title/description if needed
+                # ----------------------------------------------
+                updated = False
+                updated_fields = []
+
+                if document.title != normalized['title']:
+                    document.title = normalized['title']
+                    updated = True
+                    updated_fields.append('title')
+
+                if document.description != normalized['description']:
+                    document.description = normalized['description']
+                    updated = True
+                    updated_fields.append('description')
+
+                if updated:
+                    document.save()
+                    results['documents_updated'] += 1
+                    self.change_events.append(ChangeEvent(
+                        document=document,
+                        event_type='updated_document',
+                        change_reason=", ".join(updated_fields)
+                    ))
+
+            previous_version = document.current_version
+            published_date = normalized['published_date']
+
+            # ---------------------------------------------------
+            # 2. Apply the required rules:
+            #    Rule A: Always compare published date first
+            #    Rule B: If published date unchanged → maybe skip
+            #    Rule C: If published date missing → ALWAYS hash
+            # ---------------------------------------------------
+
+            # ---------------------------------------------------
+            # CASE 1 — Published date exists
+            # ---------------------------------------------------
+            if published_date:
+
+                # A: Try to find an existing version matching this date
+                existing_by_date = DocumentVersion.objects.filter(
                     document=document,
-                    event_type='updated_document',
-                    change_reason=', '.join(changes)
+                    published_date=published_date
+                ).first()
+
+                if existing_by_date:
+                    # Published date unchanged → No need to hash for now
+                    continue
+
+                # Published date changed → need to confirm via hash if enabled
+                pdf_hash = None
+                if fetch_pdfs:
+                    pdf_hash = self.fetch_pdf_hash(normalized['pdf_link'])
+
+                # If we have a hash, check for duplicate version
+                existing_by_hash = None
+                if pdf_hash:
+                    existing_by_hash = DocumentVersion.objects.filter(
+                        document=document,
+                        pdf_hash=pdf_hash
+                    ).first()
+
+                # If existing version has the same PDF hash → nothing changed
+                if existing_by_hash:
+                    continue
+
+                # Create a new version
+                new_version = DocumentVersion.objects.create(
+                    document=document,
+                    pdf_url=normalized['pdf_link'],
+                    published_date=published_date,
+                    pdf_hash=pdf_hash or '',
+                    fetched_at=timezone.now()
                 )
-                self.change_events.append(event)
-          # for pdf Hash
-          pdf_hash = None
-        if fetch_pdfs:
-            pdf_hash = self.fetch_pdf_hash(normalized['pdf_link'])
-        
-        # If we have a hash, check for existing version
-        if pdf_hash:
-            existing_version = DocumentVersion.objects.filter(
+                results['versions_created'] += 1
+
+                # Determine change reason
+                if not previous_version or not previous_version.published_date:
+                    change_reason = "published_date_added"
+                elif published_date > previous_version.published_date:
+                    change_reason = "new_published_date"
+                else:
+                    change_reason = "pdf_hash_changed"
+
+                # Add event
+                self.change_events.append(ChangeEvent(
+                    document=document,
+                    version=new_version,
+                    previous_version=previous_version,
+                    event_type=("new_document" if created else "new_version"),
+                    change_reason=change_reason
+                ))
+
+                # Update current version
+                if not previous_version or (
+                    previous_version.published_date
+                    and published_date > previous_version.published_date
+                ):
+                    document.current_version = new_version
+                    document.save()
+
+                continue
+
+            # ---------------------------------------------------
+            # CASE 2 — No published date → ALWAYS hash
+            # ---------------------------------------------------
+            pdf_hash = None
+            if fetch_pdfs:
+                pdf_hash = self.fetch_pdf_hash(normalized['pdf_link'])
+
+            if not pdf_hash:
+                # No hash and no date: fallback, treat as always new
+                pdf_hash = ''
+
+            existing_by_hash = DocumentVersion.objects.filter(
                 document=document,
                 pdf_hash=pdf_hash
             ).first()
-            
-            if not existing_version:
-                # Get previous version for comparison
-                previous_version = document.current_version
-                
-                # Create new version
-                new_version = DocumentVersion.objects.create(
-                    document=document,
-                    pdf_url=normalized['pdf_link'],
-                    published_date=normalized['published_date'],
-                    pdf_hash=pdf_hash,
-                    fetched_at=timezone.now()
-                )
-                results['versions_created'] += 1
-                
-                # Determine change reason
-                change_reason = 'pdf_hash_changed'
-                if previous_version:
-                    if normalized['published_date'] and previous_version.published_date:
-                        if normalized['published_date'] > previous_version.published_date:
-                            change_reason = 'new_published_date'
-                    elif normalized['published_date'] and not previous_version.published_date:
-                        change_reason = 'published_date_added'
-                
-                # Create change event
-                if created:
-                    event = ChangeEvent(
-                        document=document,
-                        event_type='new_document',
-                        version=new_version
-                    )
-                else:
-                    event = ChangeEvent(
-                        document=document,
-                        event_type='new_version',
-                        version=new_version,
-                        previous_version=previous_version,
-                        change_reason=change_reason
-                    )
-                self.change_events.append(event)
-        # and for dates
-        # Without hash, check by published date if available
-        previous_version = document.current_version
-        version_exists = False
-        change_reason = None
-        
-        if normalized['published_date']:
-            # Check if version with this published date exists
-            existing_version = DocumentVersion.objects.filter(
+
+            if existing_by_hash:
+                # Same hash → already exists → no new version needed
+                continue
+
+            # Create new version because no date + hash mismatch OR no previous version
+            new_version = DocumentVersion.objects.create(
                 document=document,
-                published_date=normalized['published_date']
-            ).first()
-            
-            if existing_version:
-                version_exists = True
-            elif previous_version and previous_version.published_date:
-                # Compare dates
-                if normalized['published_date'] > previous_version.published_date:
-                    change_reason = 'new_published_date'
-            elif not previous_version or not previous_version.published_date:
-                change_reason = 'published_date_added'
-        
-        if not version_exists:
-            # Create version if URL is different or date is newer
-            url_exists = DocumentVersion.objects.filter(
+                pdf_url=normalized['pdf_link'],
+                published_date=None,
+                pdf_hash=pdf_hash,
+                fetched_at=timezone.now()
+            )
+            results['versions_created'] += 1
+
+            # Create event
+            self.change_events.append(ChangeEvent(
                 document=document,
-                pdf_url=normalized['pdf_link']
-            ).exists()
-            
-            if not url_exists or change_reason:
-                new_version = DocumentVersion.objects.create(
-                    document=document,
-                    pdf_url=normalized['pdf_link'],
-                    published_date=normalized['published_date'],
-                    pdf_hash='',  # Will be updated later
-                    fetched_at=timezone.now()
-                )
-                results['versions_created'] += 1
-                
-                # Create change event
-                if created:
-                    event = ChangeEvent(
-                        document=document,
-                        event_type='new_document',
-                        version=new_version
-                    )
-                else:
-                    event = ChangeEvent(
-                        document=document,
-                        event_type='new_version',
-                        version=new_version,
-                        previous_version=previous_version,
-                        change_reason=change_reason or 'url_changed'
-                    )
-                self.change_events.append(event)
+                version=new_version,
+                previous_version=previous_version,
+                event_type=("new_document" if created else "new_version"),
+                change_reason="missing_date_hash_version"
+            ))
+
+            # Always update current_version when there’s no date
+            document.current_version = new_version
+            document.save()
+
+        
+        except Exception as e:
+            error_msg = f"Error processing row {row.title}: {e}"
+            logger.error(error_msg)
+            results['errors'].append(error_msg)
     ```
 6. Insert new `DocumentVersion` if different
 7. Update `current_version`
